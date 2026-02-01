@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FIM Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <style>
+        body { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); min-height: 100vh; color: #e0e0e0; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); box-shadow: 0 8px 32px rgba(0,0,0,0.37); }
+        .status-active { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(40,167,69,0.6); } 70% { box-shadow: 0 0 0 12px rgba(40,167,69,0); } 100% { box-shadow: 0 0 0 0 rgba(40,167,69,0); } }
+        .alert-card { margin-bottom: 12px; border-radius: 8px; border-left: 5px solid; transition: all 0.2s; }
+        .alert-card:hover { transform: translateX(5px); }
+        .new { border-left-color: #28a745; background: rgba(40,167,69,0.08); }
+        .modified { border-left-color: #ffc107; background: rgba(255,193,7,0.08); }
+        .deleted { border-left-color: #dc3545; background: rgba(220,53,69,0.08); }
+        .moved { border-left-color: #0dcaf0; background: rgba(13,202,240,0.08); }
+        .timestamp { font-size: 0.85rem; color: #adb5bd; }
+        .icon { margin-right: 10px; width: 20px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="text-center mb-5">
+            <h1 class="display-5 fw-bold mb-1">File Integrity Monitor</h1>
+            <p class="text-muted lead">Real-Time File Change Detection</p>
+        </div>
+
+        <!-- Folder Selection -->
+        <div class="row justify-content-center mb-5">
+            <div class="col-md-8">
+                <div class="card p-4 text-center">
+                    <h5 class="mb-3">Current Folder: <span id="currentFolder" class="text-info">Loading...</span></h5>
+                    <div class="input-group mb-3">
+                        <input type="text" id="folderInput" class="form-control bg-dark text-white" placeholder="Enter new folder path (e.g. C:\myfolder)">
+                        <button class="btn btn-outline-primary" id="setFolderBtn">Set Folder</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Card -->
+        <div class="row justify-content-center mb-5">
+            <div class="col-md-8 col-lg-6">
+                <div class="card text-center p-4">
+                    <h5 class="mb-3">Monitoring Status</h5>
+                    <h2 id="status" class="badge fs-3 px-5 py-3 bg-danger">Stopped</h2>
+                    <div class="mt-4 d-flex justify-content-center gap-3">
+                        <button id="startBtn" class="btn btn-success btn-lg">
+                            <i class="fas fa-play me-2"></i>Start Monitoring
+                        </button>
+                        <button id="stopBtn" class="btn btn-danger btn-lg" disabled>
+                            <i class="fas fa-stop me-2"></i>Stop Monitoring
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Card -->
+        <div class="card">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-bell me-2"></i>Live Alerts (Most Recent First)</span>
+                <small id="event-count">0 events</small>
+            </div>
+            <div class="card-body p-0">
+                <ul id="event-list" class="list-group list-group-flush">
+                    <!-- Alerts go here -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const eventList = document.getElementById('event-list');
+        const statusEl = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const countEl = document.getElementById('event-count');
+        const currentFolderEl = document.getElementById('currentFolder');
+        const folderInput = document.getElementById('folderInput');
+
+        socket.on('new_alert', (data) => {
+            const item = document.createElement('li');
+            item.className = `list-group-item alert-card ${data.type}`;
+            
+            const timestampMatch = data.message.match(/^\[(.*?)\]\s*(.*)$/);
+            const timestamp = timestampMatch ? timestampMatch[1] : '';
+            const messageText = timestampMatch ? timestampMatch[2] : data.message;
+
+            const iconMap = { 'new file': 'plus-circle', 'modified': 'edit', 'deleted': 'trash-alt', 'moved': 'exchange-alt' };
+            const icon = iconMap[data.type] || 'info-circle';
+
+            item.innerHTML = `
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-${icon} icon"></i>
+                        <strong>${messageText}</strong>
+                    </div>
+                    <small class="timestamp">${timestamp}</small>
+                </div>
+            `;
+            eventList.prepend(item);
+            countEl.textContent = `${eventList.children.length} events`;
+            eventList.scrollTop = 0;
+        });
+
+        socket.on('status_update', (data) => {
+            statusEl.textContent = data.status;
+            statusEl.className = `badge fs-3 px-5 py-3 ${data.status === 'Active' ? 'bg-success status-active' : 'bg-danger'}`;
+            startBtn.disabled = data.status === 'Active';
+            stopBtn.disabled = data.status !== 'Active';
+        });
+
+        socket.on('current_folder', (data) => {
+            currentFolderEl.textContent = data.path;
+        });
+
+        socket.on('response', (data) => {
+            alert(data.data);
+        });
+
+        startBtn.onclick = () => socket.emit('start_monitoring');
+        stopBtn.onclick = () => socket.emit('stop_monitoring');
+
+        document.getElementById('setFolderBtn').onclick = () => {
+            const path = folderInput.value.trim();
+            if (path) {
+                socket.emit('set_folder', { path: path });
+            } else {
+                alert("Enter a valid folder path!");
+            }
+        };
+
+        socket.on('connect', () => console.log('Connected to dashboard'));
+    </script>
+</body>
+</html>
